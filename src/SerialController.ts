@@ -7,15 +7,15 @@ export class SerialController {
       // Request a port from the user with filters for common USB-serial adapters
       // This helps identify SO-ARM101 which typically uses CH340, CP210x, or FTDI chips
       const filters = [
-        { usbVendorId: 0x1a86 }, // CH340 (QinHeng Electronics)
-        { usbVendorId: 0x10c4 }, // CP210x (Silicon Labs)
-        { usbVendorId: 0x0403 }, // FTDI
+        {usbVendorId: 0x1a86}, // CH340 (QinHeng Electronics)
+        {usbVendorId: 0x10c4}, // CP210x (Silicon Labs)
+        {usbVendorId: 0x0403}, // FTDI
       ];
 
-      this.port = await navigator.serial.requestPort({ filters });
+      this.port = await navigator.serial.requestPort({filters});
 
       // Open the port with the specified baud rate
-      await this.port.open({ baudRate });
+      await this.port.open({baudRate});
 
       // Get the writer for sending data
       if (this.port.writable) {
@@ -31,6 +31,12 @@ export class SerialController {
 
   async disconnect(): Promise<void> {
     try {
+      // Safely release all motors before disconnecting
+      for (let motorId = 1; motorId <= 6; motorId++) {
+        await this.disableMotorTorque(motorId);
+        await new Promise(resolve => setTimeout(resolve, 20));
+      }
+
       // Release the writer
       if (this.writer) {
         this.writer.releaseLock();
@@ -153,6 +159,30 @@ export class SerialController {
       return true;
     } catch (error) {
       console.error(`Failed to write position to motor ${motorId}:`, error);
+      return false;
+    }
+  }
+
+  private async disableMotorTorque(motorId: number): Promise<boolean> {
+    if (!this.writer) {
+      console.warn('Cannot disable motor torque: not connected');
+      return false;
+    }
+    // Packet format: [0xFF, 0xFF, ID, Length, Instruction, Address, Value, Checksum]
+    const INSTRUCTION_WRITE = 0x03;
+    const ADDRESS_TORQUE_ENABLE = 0x28;
+    const TORQUE_DISABLE = 0x00;
+    const length = 0x04; // Length = parameters + 2
+
+    const data = [motorId, length, INSTRUCTION_WRITE, ADDRESS_TORQUE_ENABLE, TORQUE_DISABLE];
+    const checksum = this.calculateChecksum(data);
+    try {
+      const packet = new Uint8Array([0xFF, 0xFF, ...data, checksum]);
+      await this.writer.write(packet);
+      console.log(`Motor ${motorId} torque disabled`);
+      return true;
+    } catch (error) {
+      console.error(`Failed to disable torque for motor ${motorId}:`, error);
       return false;
     }
   }
