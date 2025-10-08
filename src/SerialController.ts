@@ -121,4 +121,39 @@ export class SerialController {
 
     return positions;
   }
+
+  private createWritePositionPacket(servoId: number, position: number): Uint8Array {
+    // Packet format: [0xFF, 0xFF, ID, Length, Instruction, Address, Param1, Param2, Checksum]
+    const INSTRUCTION_WRITE = 0x03;
+    const ADDRESS_TARGET_POSITION = 0x2A;
+    const length = 0x05; // Length = parameters + 2
+
+    // Split position into low and high bytes
+    const positionLow = position & 0xFF;
+    const positionHigh = (position >> 8) & 0xFF;
+
+    const data = [servoId, length, INSTRUCTION_WRITE, ADDRESS_TARGET_POSITION, positionLow, positionHigh];
+    const checksum = this.calculateChecksum(data);
+
+    return new Uint8Array([0xFF, 0xFF, ...data, checksum]);
+  }
+
+  async writeMotorPosition(motorId: number, position: number): Promise<boolean> {
+    if (!this.writer || !this.port?.readable) {
+      throw new Error('Not connected to a serial port');
+    }
+
+    // Clamp position to valid range (0-4095)
+    const clampedPosition = Math.max(0, Math.min(4095, Math.round(position)));
+
+    try {
+      // Send the write position command
+      const packet = this.createWritePositionPacket(motorId, clampedPosition);
+      await this.writer.write(packet);
+      return true;
+    } catch (error) {
+      console.error(`Failed to write position to motor ${motorId}:`, error);
+      return false;
+    }
+  }
 }

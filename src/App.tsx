@@ -1,10 +1,18 @@
 import { useState, useRef, useEffect } from 'react'
 import { SerialController } from './SerialController'
+import { MotorControl } from './MotorControl'
 import './App.css'
 
 function App() {
   const [isConnected, setIsConnected] = useState(false)
-  const [receivedData, setReceivedData] = useState<string[]>([])
+  const [motorPositions, setMotorPositions] = useState<{ [key: number]: number | null }>({
+    1: null,
+    2: null,
+    3: null,
+    4: null,
+    5: null,
+    6: null,
+  })
   const serialController = useRef(new SerialController())
 
   const handleConnect = async () => {
@@ -12,6 +20,11 @@ function App() {
       // 1Mbps baud rate for Feetech STS3215 motors
       await serialController.current.connect(1000000)
       setIsConnected(true)
+
+      // Automatically fetch motor positions after connecting
+      setTimeout(async () => {
+        await handleGetPositions()
+      }, 500)
     } catch (error) {
       console.error('Connection failed:', error)
       alert('Failed to connect to serial port')
@@ -22,7 +35,6 @@ function App() {
     try {
       await serialController.current.disconnect()
       setIsConnected(false)
-      setReceivedData([])
     } catch (error) {
       console.error('Disconnect failed:', error)
     }
@@ -31,25 +43,30 @@ function App() {
   const handleGetPositions = async () => {
     try {
       const positions = await serialController.current.readAllMotorPositions()
-
-      let output = '\n=== Motor Positions ===\n'
-      for (const [motorId, position] of Object.entries(positions)) {
-        if (position !== null) {
-          // Convert position value (0-4095) to degrees (0-360)
-          const degrees = ((position / 4095) * 360).toFixed(2)
-          output += `Motor ${motorId}: ${position} (${degrees}°)\n`
-        } else {
-          output += `Motor ${motorId}: No response\n`
-        }
-      }
-      output += '===================\n'
-
-      setReceivedData(prev => [...prev, output])
+      setMotorPositions(positions)
     } catch (error) {
       console.error('Failed to read positions:', error)
       alert('Failed to read motor positions')
     }
   }
+
+  const handleMotorPositionChange = async (motorId: number, position: number) => {
+    try {
+      await serialController.current.writeMotorPosition(motorId, position)
+      setMotorPositions(prev => ({ ...prev, [motorId]: position }))
+    } catch (error) {
+      console.error('Failed to write motor position:', error)
+    }
+  }
+
+  const motorNames = [
+    'Base Rotation',
+    'Shoulder',
+    'Elbow',
+    'Wrist Pitch',
+    'Wrist Roll',
+    'Gripper'
+  ]
 
   useEffect(() => {
     return () => {
@@ -69,23 +86,24 @@ function App() {
         </div>
       ) : (
         <div style={{ marginBottom: '20px' }}>
-          <button onClick={handleDisconnect} style={{ backgroundColor: '#b33535', color: 'white', marginRight: '20px', width: '200px' }}>
+          <button onClick={handleDisconnect} className="disconnect-button">
             Disconnect
-          </button>
-          <button onClick={handleGetPositions} style={{ backgroundColor: '#1b76af', width: '200px' }}>
-            Get Motor Positions
           </button>
         </div>
       )}
 
       {isConnected && (
         <>
-
-          <div>
-            <h3>Received Data:</h3>
-            <div className="output-box">
-              {receivedData.join('')}
-            </div>
+          <div className="motor-controls-container">
+            {[1, 2, 3, 4, 5, 6].map((motorId) => (
+              <MotorControl
+                key={motorId}
+                motorId={motorId}
+                motorName={motorNames[motorId - 1]}
+                currentPosition={motorPositions[motorId]}
+                onPositionChange={handleMotorPositionChange}
+              />
+            ))}
           </div>
         </>
       )}
